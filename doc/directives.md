@@ -83,6 +83,7 @@ Table of Contents
     * [notify_update_timeout](#notify_update_timeout)
     * [notify_update_strict](#notify_update_strict)
     * [notify_relay_redirect](#notify_relay_redirect)
+    * [notify_stream_name_header](#notify_stream_name_header)
     * [notify_send_redirect](#notify_send_redirect)
     * [notify_method](#notify_method)
 * [HLS](#hls)
@@ -1195,6 +1196,22 @@ redirects. New stream name is MD5 hash of RTMP URL used for remote redirect.
 Default is off.
 ```sh
 notify_relay_redirect on;
+```
+
+#### notify_stream_name_header
+- syntax: `notify_stream_name_header <header-name>`
+- default: not set
+- context: rtmp, server, application
+
+Extracts a stream name from the specified HTTP response header when the
+`on_publish` callback returns a successful (2xx) status code. If the header is
+present, the internal stream name is replaced before other RTMP modules process
+the publish request. This allows simple name rewrites without using HTTP
+redirects.
+
+```sh
+notify_stream_name_header Location;
+on_publish http://auth-service/publish;
 ```
 
 #### notify_send_redirect

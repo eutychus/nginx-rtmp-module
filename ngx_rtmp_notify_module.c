@@ -80,6 +80,7 @@ typedef struct {
     ngx_msec_t                                  update_timeout;
     ngx_flag_t                                  update_strict;
     ngx_flag_t                                  relay_redirect;
+    ngx_str_t                                   stream_name_header;
 } ngx_rtmp_notify_app_conf_t;
 
 
@@ -214,6 +215,13 @@ static ngx_command_t  ngx_rtmp_notify_commands[] = {
       offsetof(ngx_rtmp_notify_app_conf_t, relay_redirect),
       NULL },
 
+    { ngx_string("notify_stream_name_header"),
+      NGX_RTMP_MAIN_CONF|NGX_RTMP_SRV_CONF|NGX_RTMP_APP_CONF|NGX_CONF_TAKE1,
+      ngx_conf_set_str_slot,
+      NGX_RTMP_APP_CONF_OFFSET,
+      offsetof(ngx_rtmp_notify_app_conf_t, stream_name_header),
+      NULL },
+
     { ngx_string("notify_send_redirect"),
       NGX_RTMP_MAIN_CONF|NGX_RTMP_SRV_CONF|NGX_RTMP_APP_CONF|NGX_CONF_TAKE1,
       ngx_rtmp_notify_send_redirect,
@@ -273,6 +281,7 @@ ngx_rtmp_notify_create_app_conf(ngx_conf_t *cf)
     nacf->update_timeout = NGX_CONF_UNSET_MSEC;
     nacf->update_strict = NGX_CONF_UNSET;
     nacf->relay_redirect = NGX_CONF_UNSET;
+    ngx_str_null(&nacf->stream_name_header);
 
     return nacf;
 }
@@ -303,6 +312,8 @@ ngx_rtmp_notify_merge_app_conf(ngx_conf_t *cf, void *parent, void *child)
                               30000);
     ngx_conf_merge_value(conf->update_strict, prev->update_strict, 0);
     ngx_conf_merge_value(conf->relay_redirect, prev->relay_redirect, 0);
+    ngx_conf_merge_str_value(conf->stream_name_header,
+                             prev->stream_name_header, "");
 
     return NGX_CONF_OK;
 }
@@ -353,7 +364,7 @@ static ngx_chain_t *
 ngx_rtmp_notify_create_request(ngx_rtmp_session_t *s, ngx_pool_t *pool,
                                    ngx_uint_t url_idx, ngx_chain_t *args)
 {
-    ngx_rtmp_notify_app_conf_t *nacf;
+    ngx_rtmp_notify_app_conf_t *nacf = NULL;
     ngx_chain_t                *al, *bl, *cl;
     ngx_url_t                  *url;
 
@@ -1321,7 +1332,8 @@ ngx_rtmp_notify_publish_handle(ngx_rtmp_session_t *s,
     ngx_str_t                   local_name;
     ngx_rtmp_relay_target_t     target;
     ngx_url_t                  *u;
-    ngx_rtmp_notify_app_conf_t *nacf;
+    ngx_rtmp_notify_app_conf_t *nacf = NULL;
+    ngx_rtmp_notify_ctx_t      *ctx;
     u_char                      name[NGX_RTMP_MAX_NAME];
 
     static ngx_str_t    location = ngx_string("location");
@@ -1355,6 +1367,35 @@ ngx_rtmp_notify_publish_handle(ngx_rtmp_session_t *s,
         return NGX_ERROR;
     }
 
+    nacf = ngx_rtmp_get_module_app_conf(s, ngx_rtmp_notify_module);
+
+    if (rc == NGX_OK) {
+        if (nacf && nacf->stream_name_header.len) {
+            ngx_int_t name_len;
+
+            name_len = ngx_rtmp_notify_parse_http_header(s, in,
+                                                         &nacf->stream_name_header,
+                                                         name,
+                                                         sizeof(name) - 1);
+            if (name_len > 0) {
+                name[name_len] = 0;
+                *ngx_cpymem(v->name, name, name_len) = 0;
+
+                ctx = ngx_rtmp_get_module_ctx(s, ngx_rtmp_notify_module);
+                if (ctx) {
+                    ngx_cpystrn(ctx->name, v->name, NGX_RTMP_MAX_NAME);
+                }
+
+                ngx_log_error(NGX_LOG_INFO, s->connection->log, 0,
+                              "notify: publish set stream name to '%s' "
+                              "from header '%V'",
+                              v->name, &nacf->stream_name_header);
+            }
+        }
+
+        goto next;
+    }
+
     if (rc != NGX_AGAIN) {
         goto next;
     }
@@ -1379,9 +1420,7 @@ ngx_rtmp_notify_publish_handle(ngx_rtmp_session_t *s,
 
     /* push */
 
-    nacf = ngx_rtmp_get_module_app_conf(s, ngx_rtmp_notify_module);
-
-    if (nacf->send_redirect) {
+    if (nacf && nacf->send_redirect) {
         // Send 302 redirect and go next
 
         ngx_log_error(NGX_LOG_INFO, s->connection->log, 0,
@@ -1422,7 +1461,7 @@ ngx_rtmp_notify_publish_handle(ngx_rtmp_session_t *s,
 
         return send;
 
-    } else if (nacf->relay_redirect) {
+    } else if (nacf && nacf->relay_redirect) {
         // Relay local streams, change name
 
         ngx_rtmp_notify_set_name(v->name, NGX_RTMP_MAX_NAME, name, (size_t) rc);
