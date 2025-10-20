@@ -79,6 +79,7 @@ Table of Contents
     * [on_publish_done](#on_publish_done)
     * [on_record_started](#on_record_started)
     * [on_record_done](#on_record_done)
+    * [on_hls_segment](#on_hls_segment)
     * [on_update](#on_update)
     * [notify_update_timeout](#notify_update_timeout)
     * [notify_update_strict](#notify_update_strict)
@@ -1143,6 +1144,70 @@ variables it receives the following values
 Example
 ```sh
 on_record_done http://example.com/recorded;
+```
+
+#### on_hls_segment
+syntax: `on_hls_segment url`  
+context: rtmp, server, application  
+
+Set HLS segment callback. This callback is triggered every time a new HLS segment
+is created. In addition to common HTTP callback variables it receives the following values:
+* call - always "hls_segment"
+* module - module name ("hls" or "dash")
+* name - stream name
+* playlist - playlist file name
+* segment - segment file name
+* sequence - segment sequence number (if available)
+* duration - segment duration in seconds (if available)
+* variant_suffix - variant suffix for multi-bitrate streams (if applicable)
+* variant_params - variant parameters from hls_variant directive (if applicable)
+* video_codec - video codec name (if available)
+* audio_codec - audio codec name (if available)
+* video_bitrate - video bitrate in bits per second (if available)
+* audio_bitrate - audio bitrate in bits per second (if available)
+* width - video width in pixels (if available)
+* height - video height in pixels (if available)
+* frame_rate - video frame rate in frames per second (if available)
+* avc_profile - H.264/AVC profile (66=baseline, 77=main, 100=high) (if available)
+* avc_compat - H.264/AVC compatibility flags (if available)
+* avc_level - H.264/AVC level (if available)
+* aac_profile - AAC profile (1=Main, 2=LC, 3=SSR) (if available)
+* hevc_profile - HEVC/H.265 profile (if available)
+* hevc_level - HEVC/H.265 level (if available)
+
+This callback is particularly useful for:
+* Post-processing HLS segments (transcoding, uploading to CDN, etc.)
+* Real-time monitoring and analytics
+* Dynamic segment manipulation
+* Integration with external storage systems
+
+HTTP status code is not checked for this callback.
+
+Example
+```sh
+application live {
+    live on;
+    hls on;
+    hls_path /tmp/hls;
+    hls_fragment 5s;
+    
+    on_hls_segment http://example.com/hls_callback;
+}
+```
+
+Example callback handler that could be implemented in your backend:
+```sh
+# Python Flask example
+@app.route('/hls_callback', methods=['POST'])
+def hls_segment_callback():
+    segment = request.form.get('segment')
+    duration = request.form.get('duration')
+    sequence = request.form.get('sequence')
+    
+    # Upload to CDN, log analytics, etc.
+    upload_to_cdn(segment)
+    
+    return '', 200
 ```
 
 #### on_update

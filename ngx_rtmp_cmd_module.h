@@ -64,6 +64,30 @@ typedef struct {
     ngx_str_t                       module;
 } ngx_rtmp_playlist_t;
 
+typedef struct {
+    ngx_str_t                       module;
+    ngx_str_t                       playlist;
+    ngx_str_t                       segment;
+    ngx_str_t                       variant_suffix;
+    ngx_str_t                       variant_params;
+    ngx_str_t                       video_codec;
+    ngx_str_t                       audio_codec;
+    ngx_uint_t                      width;
+    ngx_uint_t                      height;
+    ngx_uint_t                      video_bitrate;
+    ngx_uint_t                      audio_bitrate;
+    double                          frame_rate;
+    double                          duration;
+    uint64_t                        sequence;
+    /* Codec variant information */
+    ngx_uint_t                      avc_profile;
+    ngx_uint_t                      avc_compat;
+    ngx_uint_t                      avc_level;
+    ngx_uint_t                      aac_profile;
+    ngx_uint_t                      hevc_profile;
+    ngx_uint_t                      hevc_level;
+} ngx_rtmp_hls_segment_t;
+
 
 typedef struct {
     u_char                          name[NGX_RTMP_MAX_NAME];
@@ -137,6 +161,8 @@ typedef ngx_int_t (*ngx_rtmp_set_buflen_pt)(ngx_rtmp_session_t *s,
         ngx_rtmp_set_buflen_t *v);
 
 typedef ngx_int_t (*ngx_rtmp_playlist_pt)(ngx_rtmp_session_t *s, ngx_rtmp_playlist_t *v);
+typedef ngx_int_t (*ngx_rtmp_hls_segment_pt)(ngx_rtmp_session_t *s,
+        ngx_rtmp_hls_segment_t *v);
 
 extern ngx_rtmp_connect_pt          ngx_rtmp_connect;
 extern ngx_rtmp_disconnect_pt       ngx_rtmp_disconnect;
@@ -155,5 +181,6 @@ extern ngx_rtmp_set_buflen_pt       ngx_rtmp_set_buflen;
 extern ngx_rtmp_recorded_pt         ngx_rtmp_recorded;
 
 extern ngx_rtmp_playlist_pt         ngx_rtmp_playlist;
+extern ngx_rtmp_hls_segment_pt      ngx_rtmp_hls_segment;
 
 #endif /*_NGX_RTMP_CMD_H_INCLUDED_ */

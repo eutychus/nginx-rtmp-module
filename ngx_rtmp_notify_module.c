@@ -22,6 +22,7 @@ static ngx_rtmp_close_stream_pt                 next_close_stream;
 static ngx_rtmp_record_started_pt               next_record_started;
 static ngx_rtmp_record_done_pt                  next_record_done;
 static ngx_rtmp_playlist_pt                     next_playlist;
+static ngx_rtmp_hls_segment_pt                  next_hls_segment;
 
 
 static char *ngx_rtmp_notify_on_srv_event(ngx_conf_t *cf, ngx_command_t *cmd,
@@ -41,6 +42,10 @@ static char *ngx_rtmp_notify_merge_srv_conf(ngx_conf_t *cf, void *parent,
        void *child);
 static ngx_int_t ngx_rtmp_notify_done(ngx_rtmp_session_t *s, char *cbname,
        ngx_uint_t url_idx);
+static ngx_chain_t *ngx_rtmp_notify_hls_segment_create(ngx_rtmp_session_t *s,
+       void *arg, ngx_pool_t *pool);
+static ngx_int_t ngx_rtmp_notify_hls_segment(ngx_rtmp_session_t *s,
+       ngx_rtmp_hls_segment_t *v);
 
 
 ngx_str_t   ngx_rtmp_notify_urlencoded =
@@ -61,6 +66,7 @@ enum {
     NGX_RTMP_NOTIFY_RECORD_DONE,
     NGX_RTMP_NOTIFY_UPDATE,
     NGX_RTMP_NOTIFY_PLAYLIST,
+    NGX_RTMP_NOTIFY_HLS_SEGMENT,
     NGX_RTMP_NOTIFY_APP_MAX
 };
 
@@ -181,6 +187,13 @@ static ngx_command_t  ngx_rtmp_notify_commands[] = {
       NULL },
 
     { ngx_string("on_playlist"),
+      NGX_RTMP_MAIN_CONF|NGX_RTMP_SRV_CONF|NGX_RTMP_APP_CONF|NGX_CONF_TAKE1,
+      ngx_rtmp_notify_on_app_event,
+      NGX_RTMP_APP_CONF_OFFSET,
+      0,
+      NULL },
+
+    { ngx_string("on_hls_segment"),
       NGX_RTMP_MAIN_CONF|NGX_RTMP_SRV_CONF|NGX_RTMP_APP_CONF|NGX_CONF_TAKE1,
       ngx_rtmp_notify_on_app_event,
       NGX_RTMP_APP_CONF_OFFSET,
@@ -1030,6 +1043,261 @@ ngx_rtmp_notify_playlist_create(ngx_rtmp_session_t *s, void *arg,
     *b->last++ = '&';
 
     return ngx_rtmp_notify_create_request(s, pool, NGX_RTMP_NOTIFY_PLAYLIST,
+                                          pl);
+}
+
+static ngx_chain_t *
+ngx_rtmp_notify_hls_segment_create(ngx_rtmp_session_t *s, void *arg,
+                                   ngx_pool_t *pool)
+{
+    ngx_rtmp_hls_segment_t         *v = arg;
+    ngx_rtmp_notify_ctx_t          *ctx;
+    ngx_chain_t                    *pl;
+    ngx_buf_t                      *b;
+    size_t                          name_len, args_len, len;
+
+    ctx = ngx_rtmp_get_module_ctx(s, ngx_rtmp_notify_module);
+
+    pl = ngx_alloc_chain_link(pool);
+    if (pl == NULL) {
+        return NULL;
+    }
+
+    name_len = ngx_strlen(ctx->name);
+    args_len = ngx_strlen(ctx->args);
+
+    len = 0;
+    if (args_len) {
+        len += args_len + 1;
+    }
+
+    len += sizeof("call=hls_segment") - 1;
+    len += sizeof("&module=") - 1 + v->module.len * 3;
+    len += sizeof("&name=") - 1 + name_len * 3;
+    len += sizeof("&playlist=") - 1 + v->playlist.len * 3;
+    len += sizeof("&segment=") - 1 + v->segment.len * 3;
+
+    if (v->sequence) {
+        len += sizeof("&sequence=") - 1 + NGX_INT64_LEN;
+    }
+
+    if (v->duration > 0) {
+        len += sizeof("&duration=") - 1 + NGX_INT_T_LEN + 8;
+    }
+
+    if (v->variant_suffix.len) {
+        len += sizeof("&variant_suffix=") - 1 + v->variant_suffix.len * 3;
+    }
+
+    if (v->variant_params.len) {
+        len += sizeof("&variant_params=") - 1 + v->variant_params.len * 3;
+    }
+
+    if (v->video_codec.len) {
+        len += sizeof("&video_codec=") - 1 + v->video_codec.len * 3;
+    }
+
+    if (v->audio_codec.len) {
+        len += sizeof("&audio_codec=") - 1 + v->audio_codec.len * 3;
+    }
+
+    if (v->video_bitrate) {
+        len += sizeof("&video_bitrate=") - 1 + NGX_INT_T_LEN;
+    }
+
+    if (v->audio_bitrate) {
+        len += sizeof("&audio_bitrate=") - 1 + NGX_INT_T_LEN;
+    }
+
+    if (v->width) {
+        len += sizeof("&width=") - 1 + NGX_INT_T_LEN;
+    }
+
+    if (v->height) {
+        len += sizeof("&height=") - 1 + NGX_INT_T_LEN;
+    }
+
+    if (v->frame_rate > 0) {
+        len += sizeof("&frame_rate=") - 1 + NGX_INT_T_LEN + 8;
+    }
+
+    if (v->avc_profile) {
+        len += sizeof("&avc_profile=") - 1 + NGX_INT_T_LEN;
+    }
+
+    if (v->avc_compat) {
+        len += sizeof("&avc_compat=") - 1 + NGX_INT_T_LEN;
+    }
+
+    if (v->avc_level) {
+        len += sizeof("&avc_level=") - 1 + NGX_INT_T_LEN;
+    }
+
+    if (v->aac_profile) {
+        len += sizeof("&aac_profile=") - 1 + NGX_INT_T_LEN;
+    }
+
+    if (v->hevc_profile) {
+        len += sizeof("&hevc_profile=") - 1 + NGX_INT_T_LEN;
+    }
+
+    if (v->hevc_level) {
+        len += sizeof("&hevc_level=") - 1 + NGX_INT_T_LEN;
+    }
+
+    len += 1;
+
+    b = ngx_create_temp_buf(pool, len);
+    if (b == NULL) {
+        return NULL;
+    }
+
+    pl->buf = b;
+    pl->next = NULL;
+
+    if (args_len) {
+        b->last = ngx_cpymem(b->last, ctx->args, args_len);
+        *b->last++ = '&';
+    }
+
+    b->last = ngx_cpymem(b->last, (u_char *) "call=hls_segment",
+                         sizeof("call=hls_segment") - 1);
+
+    b->last = ngx_cpymem(b->last, (u_char *) "&module=",
+                         sizeof("&module=") - 1);
+    b->last = (u_char *) ngx_escape_uri(b->last, v->module.data,
+                                        v->module.len, NGX_ESCAPE_ARGS);
+
+    b->last = ngx_cpymem(b->last, (u_char*) "&name=",
+                         sizeof("&name=") - 1);
+    b->last = (u_char*) ngx_escape_uri(b->last, ctx->name, name_len,
+                                       NGX_ESCAPE_ARGS);
+
+    b->last = ngx_cpymem(b->last, (u_char*) "&playlist=",
+                         sizeof("&playlist=") - 1);
+    b->last = (u_char*) ngx_escape_uri(b->last, v->playlist.data,
+                                       v->playlist.len, NGX_ESCAPE_ARGS);
+
+    b->last = ngx_cpymem(b->last, (u_char*) "&segment=",
+                         sizeof("&segment=") - 1);
+    b->last = (u_char*) ngx_escape_uri(b->last, v->segment.data,
+                                       v->segment.len, NGX_ESCAPE_ARGS);
+
+    if (v->sequence) {
+        b->last = ngx_cpymem(b->last, (u_char*) "&sequence=",
+                             sizeof("&sequence=") - 1);
+        b->last = ngx_sprintf(b->last, "%uL", v->sequence);
+    }
+
+    if (v->duration > 0) {
+        b->last = ngx_cpymem(b->last, (u_char*) "&duration=",
+                             sizeof("&duration=") - 1);
+        b->last = ngx_sprintf(b->last, "%.3f", v->duration);
+    }
+
+    if (v->variant_suffix.len) {
+        b->last = ngx_cpymem(b->last, (u_char*) "&variant_suffix=",
+                             sizeof("&variant_suffix=") - 1);
+        b->last = (u_char*) ngx_escape_uri(b->last,
+                                           v->variant_suffix.data,
+                                           v->variant_suffix.len,
+                                           NGX_ESCAPE_ARGS);
+    }
+
+    if (v->variant_params.len) {
+        b->last = ngx_cpymem(b->last, (u_char*) "&variant_params=",
+                             sizeof("&variant_params=") - 1);
+        b->last = (u_char*) ngx_escape_uri(b->last,
+                                           v->variant_params.data,
+                                           v->variant_params.len,
+                                           NGX_ESCAPE_ARGS);
+    }
+
+    if (v->video_codec.len) {
+        b->last = ngx_cpymem(b->last, (u_char*) "&video_codec=",
+                             sizeof("&video_codec=") - 1);
+        b->last = (u_char*) ngx_escape_uri(b->last, v->video_codec.data,
+                                           v->video_codec.len,
+                                           NGX_ESCAPE_ARGS);
+    }
+
+    if (v->audio_codec.len) {
+        b->last = ngx_cpymem(b->last, (u_char*) "&audio_codec=",
+                             sizeof("&audio_codec=") - 1);
+        b->last = (u_char*) ngx_escape_uri(b->last, v->audio_codec.data,
+                                           v->audio_codec.len,
+                                           NGX_ESCAPE_ARGS);
+    }
+
+    if (v->video_bitrate) {
+        b->last = ngx_cpymem(b->last, (u_char*) "&video_bitrate=",
+                             sizeof("&video_bitrate=") - 1);
+        b->last = ngx_sprintf(b->last, "%ui", v->video_bitrate);
+    }
+
+    if (v->audio_bitrate) {
+        b->last = ngx_cpymem(b->last, (u_char*) "&audio_bitrate=",
+                             sizeof("&audio_bitrate=") - 1);
+        b->last = ngx_sprintf(b->last, "%ui", v->audio_bitrate);
+    }
+
+    if (v->width) {
+        b->last = ngx_cpymem(b->last, (u_char*) "&width=",
+                             sizeof("&width=") - 1);
+        b->last = ngx_sprintf(b->last, "%ui", v->width);
+    }
+
+    if (v->height) {
+        b->last = ngx_cpymem(b->last, (u_char*) "&height=",
+                             sizeof("&height=") - 1);
+        b->last = ngx_sprintf(b->last, "%ui", v->height);
+    }
+
+    if (v->frame_rate > 0) {
+        b->last = ngx_cpymem(b->last, (u_char*) "&frame_rate=",
+                             sizeof("&frame_rate=") - 1);
+        b->last = ngx_sprintf(b->last, "%.3f", v->frame_rate);
+    }
+
+    if (v->avc_profile) {
+        b->last = ngx_cpymem(b->last, (u_char*) "&avc_profile=",
+                             sizeof("&avc_profile=") - 1);
+        b->last = ngx_sprintf(b->last, "%ui", v->avc_profile);
+    }
+
+    if (v->avc_compat) {
+        b->last = ngx_cpymem(b->last, (u_char*) "&avc_compat=",
+                             sizeof("&avc_compat=") - 1);
+        b->last = ngx_sprintf(b->last, "%ui", v->avc_compat);
+    }
+
+    if (v->avc_level) {
+        b->last = ngx_cpymem(b->last, (u_char*) "&avc_level=",
+                             sizeof("&avc_level=") - 1);
+        b->last = ngx_sprintf(b->last, "%ui", v->avc_level);
+    }
+
+    if (v->aac_profile) {
+        b->last = ngx_cpymem(b->last, (u_char*) "&aac_profile=",
+                             sizeof("&aac_profile=") - 1);
+        b->last = ngx_sprintf(b->last, "%ui", v->aac_profile);
+    }
+
+    if (v->hevc_profile) {
+        b->last = ngx_cpymem(b->last, (u_char*) "&hevc_profile=",
+                             sizeof("&hevc_profile=") - 1);
+        b->last = ngx_sprintf(b->last, "%ui", v->hevc_profile);
+    }
+
+    if (v->hevc_level) {
+        b->last = ngx_cpymem(b->last, (u_char*) "&hevc_level=",
+                             sizeof("&hevc_level=") - 1);
+        b->last = ngx_sprintf(b->last, "%ui", v->hevc_level);
+    }
+
+    *b->last++ = '&';
+
+    return ngx_rtmp_notify_create_request(s, pool, NGX_RTMP_NOTIFY_HLS_SEGMENT,
                                           pl);
 }
 
@@ -2134,6 +2402,34 @@ next:
     return next_playlist(s, v);
 }
 
+static ngx_int_t
+ngx_rtmp_notify_hls_segment(ngx_rtmp_session_t *s, ngx_rtmp_hls_segment_t *v)
+{
+    ngx_rtmp_netcall_init_t         ci;
+    ngx_rtmp_notify_app_conf_t     *nacf;
+
+    nacf = ngx_rtmp_get_module_app_conf(s, ngx_rtmp_notify_module);
+    if (nacf == NULL || nacf->url[NGX_RTMP_NOTIFY_HLS_SEGMENT] == NULL) {
+        goto next;
+    }
+
+    ngx_log_error(NGX_LOG_INFO, s->connection->log, 0,
+                  "notify: hls_segment segment='%V' url='%V'",
+                  &v->segment,
+                  &nacf->url[NGX_RTMP_NOTIFY_HLS_SEGMENT]->url);
+
+    ngx_memzero(&ci, sizeof(ci));
+
+    ci.url    = nacf->url[NGX_RTMP_NOTIFY_HLS_SEGMENT];
+    ci.create = ngx_rtmp_notify_hls_segment_create;
+    ci.arg    = v;
+
+    ngx_rtmp_netcall_create(s, &ci);
+
+next:
+    return next_hls_segment(s, v);
+}
+
 
 
 static char *
@@ -2189,6 +2485,13 @@ ngx_rtmp_notify_on_app_event(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     }
 
     name = &value[0];
+
+    if (name->len == sizeof("on_hls_segment") - 1 &&
+        ngx_strncmp(name->data, (u_char *) "on_hls_segment", name->len) == 0)
+    {
+        nacf->url[NGX_RTMP_NOTIFY_HLS_SEGMENT] = u;
+        return NGX_CONF_OK;
+    }
 
     n = 0;
 
@@ -2325,6 +2628,9 @@ ngx_rtmp_notify_postconfiguration(ngx_conf_t *cf)
 
     next_playlist = ngx_rtmp_playlist;
     ngx_rtmp_playlist = ngx_rtmp_notify_playlist;
+
+    next_hls_segment = ngx_rtmp_hls_segment;
+    ngx_rtmp_hls_segment = ngx_rtmp_notify_hls_segment;
 
     return NGX_OK;
 }

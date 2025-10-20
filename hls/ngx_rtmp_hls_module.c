@@ -977,10 +977,132 @@ static ngx_int_t
 ngx_rtmp_hls_close_final_fragment(ngx_rtmp_session_t *s, int final)
 {
     ngx_rtmp_hls_ctx_t         *ctx;
+    ngx_rtmp_hls_frag_t        *f;
+    ngx_rtmp_hls_segment_t      seg;
+    ngx_rtmp_codec_ctx_t       *codec_ctx;
+    ngx_str_t                   path;
+    ngx_str_t                  *arg;
+    size_t                      variant_len;
+    ngx_uint_t                  n;
+    u_char                     *p;
+    ngx_flag_t                  notify;
 
     ctx = ngx_rtmp_get_module_ctx(s, ngx_rtmp_hls_module);
     if (ctx == NULL || !ctx->opened) {
         return NGX_OK;
+    }
+
+    ngx_memzero(&seg, sizeof(seg));
+    notify = 1;
+
+    path.data = ctx->stream.data;
+    path.len = ngx_strlen(ctx->stream.data);
+
+    if (path.len == 0) {
+        notify = 0;
+    } else {
+        seg.segment.data = ngx_pstrdup(s->connection->pool, &path);
+        if (seg.segment.data == NULL) {
+            notify = 0;
+        } else {
+            seg.segment.len = path.len;
+        }
+    }
+
+    f = ngx_rtmp_hls_get_frag(s, ctx->nfrags);
+
+    if (notify) {
+        ngx_str_set(&seg.module, "hls");
+        seg.playlist = ctx->playlist;
+
+        if (ctx->var) {
+            seg.variant_suffix = ctx->var->suffix;
+
+            if (ctx->var->args.nelts) {
+                arg = ctx->var->args.elts;
+                variant_len = 0;
+
+                for (n = 0; n < ctx->var->args.nelts; n++) {
+                    if (n) {
+                        variant_len++;
+                    }
+                    variant_len += arg[n].len;
+                }
+
+                if (variant_len) {
+                    seg.variant_params.data = ngx_pnalloc(s->connection->pool,
+                                                          variant_len);
+                    if (seg.variant_params.data != NULL) {
+                        seg.variant_params.len = variant_len;
+                        p = seg.variant_params.data;
+
+                        for (n = 0; n < ctx->var->args.nelts; n++) {
+                            if (n) {
+                                *p++ = ' ';
+                            }
+                            p = ngx_cpymem(p, arg[n].data, arg[n].len);
+                        }
+                    }
+                }
+            }
+        }
+
+        if (f) {
+            seg.sequence = f->id;
+            seg.duration = f->duration;
+        }
+
+        codec_ctx = ngx_rtmp_get_module_ctx(s, ngx_rtmp_codec_module);
+        if (codec_ctx) {
+            if (codec_ctx->video_codec_id) {
+                u_char  *video;
+
+                video = ngx_rtmp_get_video_codec_name(codec_ctx->video_codec_id);
+                if (video) {
+                    seg.video_codec.data = video;
+                    seg.video_codec.len = ngx_strlen(video);
+                }
+
+                seg.width = codec_ctx->width;
+                seg.height = codec_ctx->height;
+
+                if (codec_ctx->video_data_rate > 0) {
+                    seg.video_bitrate = (ngx_uint_t)
+                        (codec_ctx->video_data_rate * 1000);
+                }
+
+                if (codec_ctx->frame_rate > 0) {
+                    seg.frame_rate = codec_ctx->frame_rate;
+                }
+
+                /* Populate H.264/AVC profile and level */
+                seg.avc_profile = codec_ctx->avc_profile;
+                seg.avc_compat = codec_ctx->avc_compat;
+                seg.avc_level = codec_ctx->avc_level;
+
+                /* Populate HEVC profile and level */
+                seg.hevc_profile = codec_ctx->hevc_profile;
+                seg.hevc_level = codec_ctx->hevc_level;
+            }
+
+            if (codec_ctx->audio_codec_id) {
+                u_char  *audio;
+
+                audio = ngx_rtmp_get_audio_codec_name(codec_ctx->audio_codec_id);
+                if (audio) {
+                    seg.audio_codec.data = audio;
+                    seg.audio_codec.len = ngx_strlen(audio);
+                }
+
+                if (codec_ctx->audio_data_rate > 0) {
+                    seg.audio_bitrate = (ngx_uint_t)
+                        (codec_ctx->audio_data_rate * 1000);
+                }
+
+                /* Populate AAC profile */
+                seg.aac_profile = codec_ctx->aac_profile;
+            }
+        }
     }
 
     ngx_log_debug1(NGX_LOG_DEBUG_RTMP, s->connection->log, 0,
@@ -993,6 +1115,10 @@ ngx_rtmp_hls_close_final_fragment(ngx_rtmp_session_t *s, int final)
     ngx_rtmp_hls_next_frag(s);
 
     ngx_rtmp_hls_write_playlist(s, final);
+
+    if (notify && seg.segment.data != NULL && ngx_rtmp_hls_segment) {
+        ngx_rtmp_hls_segment(s, &seg);
+    }
 
     return NGX_OK;
 }
