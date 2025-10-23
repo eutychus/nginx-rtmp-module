@@ -1009,7 +1009,7 @@ ngx_rtmp_hls_close_final_fragment(ngx_rtmp_session_t *s, int final)
         }
     }
 
-    f = ngx_rtmp_hls_get_frag(s, ctx->nfrags);
+    f = NULL;
 
     if (notify) {
         ngx_str_set(&seg.module, "hls");
@@ -1046,6 +1046,9 @@ ngx_rtmp_hls_close_final_fragment(ngx_rtmp_session_t *s, int final)
                 }
             }
         }
+
+        /* Read fragment data for notification */
+        f = ngx_rtmp_hls_get_frag(s, ctx->nfrags);
 
         if (f) {
             seg.sequence = f->id;
