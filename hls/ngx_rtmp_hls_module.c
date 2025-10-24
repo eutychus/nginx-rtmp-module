@@ -657,10 +657,6 @@ ngx_rtmp_hls_write_playlist(ngx_rtmp_session_t *s, int final)
         end = p + sizeof(buffer);
 
         if (f->discont) {
-            ngx_log_error(NGX_LOG_ERR, s->connection->log, 0,
-                          "hls: WRITING discontinuity for fragment i=%i, id=%uL, "
-                          "nfrags=%ui, frag=%uL",
-                          i, f->id, ctx->nfrags, ctx->frag);
             p = ngx_slprintf(p, end, "#EXT-X-DISCONTINUITY\n");
         }
 
@@ -1267,10 +1263,6 @@ ngx_rtmp_hls_open_fragment(ngx_rtmp_session_t *s, uint64_t ts,
     f->id = id;
     f->key_id = ctx->key_id;
     f->datetime = datetime;
-
-    ngx_log_error(NGX_LOG_ERR, s->connection->log, 0,
-                  "hls: OPENED fragment id=%uL, nfrags=%ui, discont=%i, ts=%uL",
-                  f->id, ctx->nfrags, (int)f->discont, ts);
 
     ctx->frag_ts = ts;
 
@@ -2360,16 +2352,6 @@ ngx_rtmp_hls_video(ngx_rtmp_session_t *s, ngx_rtmp_header_t *h,
     b = ctx->aframe;
     boundary = frame.key && (codec_ctx->aac_header == NULL || !ctx->opened ||
                              (b && b->last > b->pos));
-
-    ngx_log_error(NGX_LOG_ERR, s->connection->log, 0,
-                  "hls: video frame: keyframe=%i, aac_hdr=%i, opened=%i, "
-                  "audio_buf=%i, boundary=%i, dts=%uL",
-                  (int)frame.key,
-                  codec_ctx->aac_header != NULL,
-                  (int)ctx->opened,
-                  (b && b->last > b->pos),
-                  boundary,
-                  frame.dts);
 
     ngx_rtmp_hls_update_fragment(s, frame.dts, boundary, 1);
 
