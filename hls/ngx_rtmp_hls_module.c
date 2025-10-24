@@ -73,7 +73,6 @@ typedef struct {
     uint64_t                            key_id;
     ngx_uint_t                          nfrags;
     ngx_rtmp_hls_frag_t                *frags; /* circular 2 * winfrags + 1 */
-    uint64_t                            mediaseq;
 
     ngx_uint_t                          audio_cc;
     ngx_uint_t                          video_cc;
@@ -603,7 +602,7 @@ ngx_rtmp_hls_write_playlist(ngx_rtmp_session_t *s, int final)
                      "#EXT-X-VERSION:3\n"
                      "#EXT-X-MEDIA-SEQUENCE:%uL\n"
                      "#EXT-X-TARGETDURATION:%ui\n",
-                     ctx->mediaseq++, max_frag);
+                     ctx->frag, max_frag);
 
     if (hacf->type == NGX_RTMP_HLS_TYPE_EVENT) {
         p = ngx_slprintf(p, end, "#EXT-X-PLAYLIST-TYPE:EVENT\n");
@@ -1051,7 +1050,7 @@ ngx_rtmp_hls_close_final_fragment(ngx_rtmp_session_t *s, int final)
         f = ngx_rtmp_hls_get_frag(s, ctx->nfrags);
 
         if (f) {
-            seg.sequence = f->id;
+            seg.sequence = ctx->frag + ctx->nfrags;
             seg.duration = f->duration;
         }
 
